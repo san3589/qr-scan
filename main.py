@@ -37,14 +37,23 @@ def send_qr_data(qr_data, category_id):
 
 def scan_qr_code(category_id):
     global camera_on
+
     if camera_on:
         cap = cv2.VideoCapture(0)
         if not cap.isOpened():
             logger("Камера не включена")
+            return
+
+
+        # Обновляем окно Tkinter
+        # Цикл, пока камера включена
         while camera_on:
             ret, frame = cap.read()
-            if not ret:
-                break
+            image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            photo = ImageTk.PhotoImage(image)
+            camera_label.config(image=photo)
+            camera_label.image = photo
+            root.update()
 
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             decode_object = pyzbar.decode(gray)
@@ -62,16 +71,12 @@ def scan_qr_code(category_id):
                     cv2.line(frame, pt2, pt3, (255, 0, 0), 3)
                     cv2.line(frame, pt3, pt4, (255, 0, 0), 3)
                     cv2.line(frame, pt4, pt1, (255, 0, 0), 3)
-                image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-                photo = ImageTk.PhotoImage(image)
-                camera_label.config(image=photo)
-                camera_label.image = photo
-                root.update()
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    camera_on = False
-                    break
+                    cv2.imshow('Камера', frame)
+
+        # Закрываем камеру и окна
         cap.release()
         cv2.destroyAllWindows()
+        root.destroy()
 
 def start_scan():
     category_id = category_var.get()
@@ -79,12 +84,15 @@ def start_scan():
         scan_qr_code(category_id)
     else:
        logger("Необходимо выбрать категорию")
+
+
+
 def toogle_camera():
     global camera_on
     camera_on = not camera_on
     if camera_on:
         camera_button.config(text="Отключить камеру")
-        scan_qr_code(category_var.get())
+        scan_qr_code('1')
     else:
         camera_button.config(text="Включить камеру камеру")
         cv2.destroyAllWindows()
@@ -95,7 +103,7 @@ def logger(message):
     log_text.config(state='disabled')
 
 
-root  = Tk()
+root = Tk()
 root.title('Скан QR Кодов')
 camera_label = Label(root)
 camera_label.pack()
