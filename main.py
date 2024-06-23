@@ -1,5 +1,6 @@
 import time
-from tkinter import Tk, Label, Entry, Button, StringVar, OptionMenu, messagebox
+import tkinter
+from tkinter import Tk, Label, Entry, Button, StringVar, OptionMenu, Text
 from PIL import Image, ImageTk
 import cv2
 import pyzbar.pyzbar as pyzbar
@@ -29,9 +30,9 @@ def send_qr_data(qr_data, category_id):
     params = {'category': category_id}
     response = requests.post(url=API_URL_QR_CODE_INFO, headers=headers, data=data, params=params)
     if response.status_code == 200:
-        messagebox.showinfo("Данные успешно отправлены")
+        logger("Данные успешно отправлены")
     else:
-        messagebox.showerror('Ошибка отправки данных')
+        logger('Ошибка отправки данных')
 
 
 def scan_qr_code(category_id):
@@ -39,15 +40,17 @@ def scan_qr_code(category_id):
     if camera_on:
         cap = cv2.VideoCapture(0)
         if not cap.isOpened():
-            messagebox.showerror("Камера не включена")
+            logger("Камера не включена")
         while camera_on:
             ret, frame = cap.read()
-            cv2.imshow("Камера", frame)
+            if not ret:
+                break
+
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             decode_object = pyzbar.decode(gray)
             for obj in decode_object:
                 data = obj.data.decode('utf-8')
-                messagebox.showinfo("QR код прочитан")
+                logger("QR код прочитан")
                 send_qr_data(data, category_id)
                 points = obj.polygon
                 if len(points) > 4:
@@ -63,25 +66,34 @@ def scan_qr_code(category_id):
                 photo = ImageTk.PhotoImage(image)
                 camera_label.config(image=photo)
                 camera_label.image = photo
+                root.update()
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     camera_on = False
                     break
-                cap.release()
-                cv2.destroyAllWindows()
+        cap.release()
+        cv2.destroyAllWindows()
 
 def start_scan():
     category_id = category_var.get()
     if category_id:
         scan_qr_code(category_id)
     else:
-        messagebox.showerror("Необходимо выбрать категорию")
+       logger("Необходимо выбрать категорию")
 def toogle_camera():
     global camera_on
     camera_on = not camera_on
     if camera_on:
         camera_button.config(text="Отключить камеру")
+        scan_qr_code(category_var.get())
     else:
         camera_button.config(text="Включить камеру камеру")
+        cv2.destroyAllWindows()
+
+def logger(message):
+    log_text.config(state='normal')
+    log_text.insert(tkinter.END, f"{message}\n")
+    log_text.config(state='disabled')
+
 
 root  = Tk()
 root.title('Скан QR Кодов')
@@ -102,7 +114,8 @@ category_ids = get_categories_id()
 category_menu = OptionMenu(root, category_var, *category_ids)
 category_menu.pack()
 
-
+log_text = Text(root, height=10, wrap=tkinter.WORD, state='disabled')
+log_text.pack()
 
 
 root.mainloop()
