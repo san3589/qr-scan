@@ -1,47 +1,73 @@
 import time
 import tkinter
+import os
 from tkinter import Tk, Label, Entry, Button, StringVar, OptionMenu, Text, messagebox
 from PIL import Image, ImageTk
 import cv2
 import pyzbar.pyzbar as pyzbar
 import requests
 
-API_URL_CATEGORY_INFO = ""
-API_URL_QR_CODE_INFO = ""
-API_KEY = ""
+camera_on = True
 
-camera_on = False
+def get_camera_list():
+    camera_list = []
+    for i in range(0, 10):
+        cap = cv2.VideoCapture(i)
+        if cap.isOpened():
+            name = cap.getBackendName()
+            if not name:
+                name = f"Камера {i}"
+            camera_list.append((i, name))
+            cap.release()
+    return camera_list
 
 
-def get_categories_id():
+def update_camera_menu():
+    global camera_list, camera_var, camera_menu
+    camera_list = get_camera_list()
+    camera_names = [name for _, name in camera_list]
+    camera_menu.destroy()
+    camera_menu = tkinter.OptionMenu(root, camera_var, *camera_names)
+    camera_menu.pack()
 
+
+def get_channels_id():
     res = requests.get("https://octopus-app-uckx7.ondigitalocean.app/api/channels")
     if res.status_code == 200:
         channels = []
         for chanel in res.json()['data']['channels']:
-            channels.append(chanel['id'])
+            channels.append({'id': chanel['id'], 'name':chanel['name']})
         return channels
     else:
         logger("Получение данных c api неудачно")
         return None
 
 
+def send_qr_data(qr_data, channel_id):
+    data = {}
+    data["channel_id"] = int(channel_id)
+    data["team"] = qr_data
 
-def send_qr_data(qr_data, category_id):
-    data = qr_data
-    data["channel_id"] = category_id
-    response = requests.post(url="https://octopus-app-uckx7.ondigitalocean.app/api/event/activate_team",  data=data)
-    if response.status_code == 200:
-        logger("Данные успешно отправлены")
+    with open('cache.txt', 'r') as file:
+        src = file.readlines()
+    src = [sr.strip() for sr in src]
+    if data['team'] not in src:
+        response = requests.post(url="https://octopus-app-uckx7.ondigitalocean.app/api/event/activate_team",  json=data)
+        if response.status_code == 200:
+            logger(f"Данные команды {data['team']} успешно отправлены")
+            with open('cache.txt', 'a') as file:
+                file.write(f"{data['team']}\n")
+        else:
+            logger(f"Ошибка отправки данных команды {data['team']}")
     else:
-        logger('Ошибка отправки данных')
+        logger(f"Команда {data['team']} есть в кэше. Очистите кэш и повторите попытку")
 
 
-def scan_qr_code(category_id):
+def scan_qr_code(channel_id, camera_id):
     global camera_on
 
     if camera_on:
-        cap = cv2.VideoCapture(0)
+        cap = cv2.VideoCapture(camera_id)
         if not cap.isOpened():
             logger("Камера не включена")
             return
@@ -58,8 +84,9 @@ def scan_qr_code(category_id):
             decode_object = pyzbar.decode(gray)
             for obj in decode_object:
                 data = obj.data.decode('utf-8')
-                logger("QR код прочитан")
-                send_qr_data(data, category_id)
+                print(data)
+                logger(f"QR код прочитан {data}")
+                send_qr_data(data, channel_id)
                 points = obj.polygon
                 if len(points) > 4:
                     pt1 = (points[0].x, points[0].y)
@@ -79,18 +106,26 @@ def scan_qr_code(category_id):
 
 
 def toogle_camera():
-    global camera_on
+    global camera_on, camera_var
     camera_on = not camera_on
-    category_id = category_var.get()
-    if category_id:
-        if camera_on:
-            camera_button.config(text="Отключить камеру")
-            scan_qr_code(category_id)
-        else:
-            camera_button.config(text="Включить  камеру")
-            cv2.destroyAllWindows()
+    channel_name = channel_var.get()
+    camera_index = camera_names.index(camera_var.get())
+    camera_id = camera_list[camera_index][0]
+
+    if channel_name:
+        for channel in channels_info:
+            if channel['name'] == channel_name:
+                channel_id = channel['id']
+
+                if camera_on:
+                    camera_button.config(text="Отключить камеру")
+                    scan_qr_code(channel_id, camera_id)
+                else:
+                    camera_button.config(text="Включить  камеру")
+                    cv2.destroyAllWindows()
     else:
-        messagebox.showwarning("Необходимо выбрать категорию")
+        messagebox.showwarning("Необходимо выбрать канал")
+
 
 
 def logger(message):
@@ -99,25 +134,42 @@ def logger(message):
     log_text.config(state='disabled')
 
 
+def clear_cache():
+    if os.path.exists('cache.txt'):
+        os.remove('cache.txt')
+        logger('Кэш очищен')
+
+
 root = Tk()
 root.title('Скан QR Кодов')
 camera_label = Label(root)
 camera_label.pack()
 
-category_label = Label(root, text="ID категории")
-category_label.pack()
+channel_label = Label(root, text="ID канала")
+channel_label.pack()
 
-category_var = StringVar(root)
-category_entry = Entry(root, textvariable=category_var)
-category_entry.pack()
+channel_var = StringVar(root)
+channel_entry = Entry(root, textvariable=channel_var)
+channel_entry.pack()
+
+camera_var = StringVar(root)
+camera_list = get_camera_list()
+camera_names = [name for _, name in camera_list]
+
+camera_var.set(camera_names[0])
+
+camera_menu = tkinter.OptionMenu(root, camera_var, *camera_names)
+camera_menu.pack()
+
 camera_button = Button(root, text="Включить камеру", command=toogle_camera)
 camera_button.pack()
 
 log_text = Text(root, height=10, wrap=tkinter.WORD, state='disabled')
 log_text.pack()
 
-category_ids = get_categories_id()
-category_menu = OptionMenu(root, category_var, *category_ids)
-category_menu.pack()
+channels_info = get_channels_id()
+channels_names = [channel['name'] for channel in channels_info]
+channel_menu = OptionMenu(root, channel_var, *channels_names)
+channel_menu.pack()
 
 root.mainloop()
