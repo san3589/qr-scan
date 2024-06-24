@@ -1,6 +1,6 @@
 import time
 import tkinter
-from tkinter import Tk, Label, Entry, Button, StringVar, OptionMenu, Text
+from tkinter import Tk, Label, Entry, Button, StringVar, OptionMenu, Text, messagebox
 from PIL import Image, ImageTk
 import cv2
 import pyzbar.pyzbar as pyzbar
@@ -13,22 +13,24 @@ API_KEY = ""
 camera_on = False
 
 
-
 def get_categories_id():
-    headers = {}
-    # response = requests.get(url=API_URL_CATEGORY_INFO, headers=headers)
-    # if response.status_code == 200:
-    #     return response.json()
-    # else:
-    #     messagebox.showerror("Ошибка получений категорий. Попробуйте снова.")
-    return [1, 2, 3]
+
+    res = requests.get("https://octopus-app-uckx7.ondigitalocean.app/api/channels")
+    if res.status_code == 200:
+        channels = []
+        for chanel in res.json()['data']['channels']:
+            channels.append(chanel['id'])
+        return channels
+    else:
+        logger("Получение данных c api неудачно")
+        return None
+
+
 
 def send_qr_data(qr_data, category_id):
-
-    headers = {}
     data = qr_data
-    params = {'category': category_id}
-    response = requests.post(url=API_URL_QR_CODE_INFO, headers=headers, data=data, params=params)
+    data["channel_id"] = category_id
+    response = requests.post(url="https://octopus-app-uckx7.ondigitalocean.app/api/event/activate_team",  data=data)
     if response.status_code == 200:
         logger("Данные успешно отправлены")
     else:
@@ -44,9 +46,6 @@ def scan_qr_code(category_id):
             logger("Камера не включена")
             return
 
-
-        # Обновляем окно Tkinter
-        # Цикл, пока камера включена
         while camera_on:
             ret, frame = cap.read()
             image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
@@ -78,24 +77,21 @@ def scan_qr_code(category_id):
         cv2.destroyAllWindows()
         root.destroy()
 
-def start_scan():
-    category_id = category_var.get()
-    if category_id:
-        scan_qr_code(category_id)
-    else:
-       logger("Необходимо выбрать категорию")
-
-
 
 def toogle_camera():
     global camera_on
     camera_on = not camera_on
-    if camera_on:
-        camera_button.config(text="Отключить камеру")
-        scan_qr_code('1')
+    category_id = category_var.get()
+    if category_id:
+        if camera_on:
+            camera_button.config(text="Отключить камеру")
+            scan_qr_code(category_id)
+        else:
+            camera_button.config(text="Включить  камеру")
+            cv2.destroyAllWindows()
     else:
-        camera_button.config(text="Включить камеру камеру")
-        cv2.destroyAllWindows()
+        messagebox.showwarning("Необходимо выбрать категорию")
+
 
 def logger(message):
     log_text.config(state='normal')
@@ -114,16 +110,14 @@ category_label.pack()
 category_var = StringVar(root)
 category_entry = Entry(root, textvariable=category_var)
 category_entry.pack()
-start_button = Button(root, text="Начать сканирование", command=start_scan)
 camera_button = Button(root, text="Включить камеру", command=toogle_camera)
 camera_button.pack()
-
-category_ids = get_categories_id()
-category_menu = OptionMenu(root, category_var, *category_ids)
-category_menu.pack()
 
 log_text = Text(root, height=10, wrap=tkinter.WORD, state='disabled')
 log_text.pack()
 
+category_ids = get_categories_id()
+category_menu = OptionMenu(root, category_var, *category_ids)
+category_menu.pack()
 
 root.mainloop()
