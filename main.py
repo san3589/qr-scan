@@ -68,7 +68,7 @@ def send_qr_data(qr_data, channel_id):
             logger(f"Ошибка отправки данных команды {data['team']}")
     else:
         logger(f"Команда {data['team']} есть в кэше. Очистите кэш и повторите попытку")
-        # time.sleep(1)
+        time.sleep(1)
 
 
 def scan_qr_code(channel_id, camera_id):
