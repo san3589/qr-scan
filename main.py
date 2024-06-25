@@ -1,20 +1,23 @@
 import time
 import tkinter
 import os
-from tkinter import Tk, Label, Entry, Button, StringVar, OptionMenu, Text, messagebox
+from datetime import datetime
+from tkinter import Tk, Label, Entry, Button, StringVar, OptionMenu, Text, messagebox, scrolledtext
 from PIL import Image, ImageTk
 import cv2
 import pyzbar.pyzbar as pyzbar
+from pygrabber.dshow_graph import FilterGraph
 import requests
 
 camera_on = True
 
 def get_camera_list():
     camera_list = []
+    devices = FilterGraph().get_input_devices()
     for i in range(0, 10):
         cap = cv2.VideoCapture(i)
         if cap.isOpened():
-            name = cap.getBackendName()
+            name = devices[i]
             if not name:
                 name = f"Камера {i}"
             camera_list.append((i, name))
@@ -44,12 +47,15 @@ def get_channels_id():
 
 
 def send_qr_data(qr_data, channel_id):
+
     data = {}
     data["channel_id"] = int(channel_id)
     data["team"] = qr_data
-
-    with open('cache.txt', 'r') as file:
-        src = file.readlines()
+    try:
+        with open('cache.txt', 'r') as file:
+            src = file.readlines()
+    except FileNotFoundError:
+        src = []
     src = [sr.strip() for sr in src]
     if data['team'] not in src:
         response = requests.post(url="https://octopus-app-uckx7.ondigitalocean.app/api/event/activate_team",  json=data)
@@ -57,10 +63,12 @@ def send_qr_data(qr_data, channel_id):
             logger(f"Данные команды {data['team']} успешно отправлены")
             with open('cache.txt', 'a') as file:
                 file.write(f"{data['team']}\n")
+                time.sleep(1)
         else:
             logger(f"Ошибка отправки данных команды {data['team']}")
     else:
         logger(f"Команда {data['team']} есть в кэше. Очистите кэш и повторите попытку")
+        # time.sleep(1)
 
 
 def scan_qr_code(channel_id, camera_id):
@@ -74,63 +82,59 @@ def scan_qr_code(channel_id, camera_id):
 
         while camera_on:
             ret, frame = cap.read()
+            camera_label.config(state='normal', width=400, height=400)
+
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            decode_object = pyzbar.decode(gray)
+            for obj in decode_object:
+                x, y, w, h = obj.rect
+                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+
+                data = obj.data.decode('utf-8')
+                logger(f"QR код прочитан {data}")
+                send_qr_data(data, channel_id)
             image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
             photo = ImageTk.PhotoImage(image)
             camera_label.config(image=photo)
             camera_label.image = photo
             root.update()
 
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            decode_object = pyzbar.decode(gray)
-            for obj in decode_object:
-                data = obj.data.decode('utf-8')
-                print(data)
-                logger(f"QR код прочитан {data}")
-                send_qr_data(data, channel_id)
-                points = obj.polygon
-                if len(points) > 4:
-                    pt1 = (points[0].x, points[0].y)
-                    pt2 = (points[1].x, points[1].y)
-                    pt3 = (points[2].x, points[2].y)
-                    pt4 = (points[3].x, points[3].y)
-                    cv2.line(frame, pt1, pt2, (255, 0, 0), 3)
-                    cv2.line(frame, pt2, pt3, (255, 0, 0), 3)
-                    cv2.line(frame, pt3, pt4, (255, 0, 0), 3)
-                    cv2.line(frame, pt4, pt1, (255, 0, 0), 3)
-                    cv2.imshow('Камера', frame)
-
-        # Закрываем камеру и окна
         cap.release()
-        cv2.destroyAllWindows()
-        root.destroy()
+        camera_label.config(state='disabled')
 
 
-def toogle_camera():
+def toggle_camera():
     global camera_on, camera_var
-    camera_on = not camera_on
+
     channel_name = channel_var.get()
     camera_index = camera_names.index(camera_var.get())
     camera_id = camera_list[camera_index][0]
 
-    if channel_name:
-        for channel in channels_info:
-            if channel['name'] == channel_name:
-                channel_id = channel['id']
-
-                if camera_on:
-                    camera_button.config(text="Отключить камеру")
+    if not camera_on:  # Если камера выключена, включаем ее
+        camera_on = True
+        camera_button.config(text="Отключить камеру")
+        logger(f"Камера {camera_names[camera_index]} включена")
+        if channel_name:
+            for channel in channels_info:
+                if channel['name'] == channel_name:
+                    channel_id = channel['id']
                     scan_qr_code(channel_id, camera_id)
-                else:
-                    camera_button.config(text="Включить  камеру")
-                    cv2.destroyAllWindows()
-    else:
-        messagebox.showwarning("Необходимо выбрать канал")
+        else:
+            messagebox.showwarning("Необходимо выбрать канал")
+    else:  # Если камера включена, выключаем ее
+        camera_on = False
+        camera_button.config(text="Включить  камеру")
+        logger(f"Камера {camera_names[camera_index]} отключена")
+
 
 
 
 def logger(message):
+    now = datetime.now()
     log_text.config(state='normal')
     log_text.insert(tkinter.END, f"{message}\n")
+    with open('logger.txt', 'a', encoding='utf-8') as file:
+        file.write(f"{now.isoformat()} {message}\n")
     log_text.config(state='disabled')
 
 
@@ -138,38 +142,54 @@ def clear_cache():
     if os.path.exists('cache.txt'):
         os.remove('cache.txt')
         logger('Кэш очищен')
+    else:
+        logger("Кэш пуст")
 
 
 root = Tk()
-root.title('Скан QR Кодов')
+root.title('QR Scanner')
 camera_label = Label(root)
-camera_label.pack()
+camera_label.grid(row=0, column=0, columnspan=3, sticky="nw")
 
-channel_label = Label(root, text="ID канала")
-channel_label.pack()
+#
+clear_button = Button(root, text="Очистить кэш", command=clear_cache, width=15, height=2, font=("Arial", 12))
+clear_button.grid(row=0, column=2, sticky="ne", padx=10, pady=10)
+
+
+channel_label = Label(root, text="Название канала")
+channel_label.grid(row=0, column=1, sticky="s")
+
 
 channel_var = StringVar(root)
 channel_entry = Entry(root, textvariable=channel_var)
-channel_entry.pack()
+channel_entry.grid(row=1, column=1, sticky="w")
 
-camera_var = StringVar(root)
-camera_list = get_camera_list()
-camera_names = [name for _, name in camera_list]
-
-camera_var.set(camera_names[0])
-
-camera_menu = tkinter.OptionMenu(root, camera_var, *camera_names)
-camera_menu.pack()
-
-camera_button = Button(root, text="Включить камеру", command=toogle_camera)
-camera_button.pack()
-
-log_text = Text(root, height=10, wrap=tkinter.WORD, state='disabled')
-log_text.pack()
 
 channels_info = get_channels_id()
 channels_names = [channel['name'] for channel in channels_info]
 channel_menu = OptionMenu(root, channel_var, *channels_names)
-channel_menu.pack()
+channel_menu.grid(row=1, column=2, sticky="w")
+
+
+camera_var = StringVar(root)
+camera_list = get_camera_list()
+camera_names = [name for _, name in camera_list]
+camera_var.set(camera_names[0])
+camera_menu = OptionMenu(root, camera_var, *camera_names)
+camera_menu.grid(row=2, column=2, sticky="w")
+
+
+camera_button = Button(root, text="Включить камеру", command=toggle_camera, width=15, height=2, padx=5, pady=5, font=('Arial', 12))
+camera_button.grid(row=2, column=0, columnspan=2, sticky="ew", padx=10, pady=10)
+
+
+log_text = scrolledtext.ScrolledText(root, height=20, wrap=tkinter.WORD, state='disabled')
+log_text.config(state='normal')
+log_text.grid(row=3, column=0, columnspan=3, sticky="nsew")
+
+
+root.grid_rowconfigure(3, weight=1)
+root.grid_columnconfigure(0, weight=1)
+
 
 root.mainloop()
