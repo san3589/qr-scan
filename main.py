@@ -136,6 +136,7 @@ def logger(message):
     with open('logger.txt', 'a', encoding='utf-8') as file:
         file.write(f"{now.isoformat()} {message}\n")
     log_text.config(state='disabled')
+    log_text.see('end')
 
 
 def clear_cache():
